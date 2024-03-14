@@ -1,0 +1,20 @@
+{
+  "name": "emailbackup",
+  "version": "1.0.0",
+  "description": "node.js script for emailbackup",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
+  },
+  "author": "jayesh kaushal",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.3",
+    "imap": "^0.8.19",
+    "mailparser": "^3.6.9",
+    "mongoose": "^8.2.1"
+  }
+}
