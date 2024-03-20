@@ -26,4 +26,4 @@ var userSchema = new mongoose.Schema({
       type:String,
     }
   })
-module.exports = mongoose.model("users",userSchema)
+module.exports = mongoose.model("emailbackup",userSchema)
