@@ -3,6 +3,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 var base64  = require('base64-stream');
 const AWS = require('aws-sdk');
+var Joi = require('joi');
 const fs = require('fs');
 const path = require('path');
 const app = express();
@@ -74,6 +75,15 @@ app.use(express.json());
 //         }
 //       });
 // }
+
+
+const validationMiddleware = (req,res,next) =>{
+  const schema =Joi.object().key({
+    name: Joi.string().required(),
+    password: Joi.string().required()
+  })
+  next();
+}
 
 function findAttachmentParts(struct, attachments) {
   attachments = attachments ||  [];
