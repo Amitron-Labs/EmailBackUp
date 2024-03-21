@@ -79,8 +79,13 @@ app.use(express.json());
 
 const validationMiddleware = (req,res,next) =>{
   const schema =Joi.object().key({
-    name: Joi.string().required(),
-    password: Joi.string().required()
+    send_to: Joi.string().required(),
+    datatime: Joi.string().required(),
+    attachment: Joi.string().required(),
+    subject: Joi.string().required(),
+    cc: Joi.string().required(),
+    bcc: Joi.string().required(),
+    send_from: Joi.string().required(),
   })
   next();
 }
