@@ -6,6 +6,7 @@ const AWS = require('aws-sdk');
 var Joi = require('joi');
 const fs = require('fs');
 const path = require('path');
+const { Stream } = require("stream");
 const app = express();
 var Imap = require("imap"),
   inspect = require("util").inspect;
@@ -202,6 +203,52 @@ async function fetchdata() {
           });
         });
         msg.once('attributes', function(attrs) {
+          const attachment_data = findAttachmentParts(attrs.struct);
+          console.log(`${prefix} uid=${attrs.uid} Has attachments: ${attachments.length}`);
+          attachment.forEach((attachment)=>{
+            /* 
+          RFC2184 MIME Parameter Value and Encoded Word Extensions
+                  4.Parameter Value Character Set and Language Information
+          RFC2231 Obsoletes: 2184
+          {
+            partID: "2",
+            type: "image",
+            subtype: "jpeg",
+            params: {
+    X         "name":"________20.jpg",
+              "x-apple-part-url":"8C33222D-8ED9-4B10-B05D-0E028DEDA92A"
+            },
+            id: null,
+            description: null,
+            encoding: "base64",
+            size: 351314,
+            md5: null,
+            disposition: {
+              type: "inline",
+              params: {
+    V           "filename*":"GB2312''%B2%E2%CA%D4%B8%BD%BC%FE%D2%BB%5F.jpg"
+              }
+            },
+            language: null
+          }   */  
+          console.log(`${prefix} Fetching attachment $(attachment.params.name`)
+          console.log(attachment.disposition.params["filename*"])
+          const  filename = attachment.params.name // need decode disposition.params['filename*'] !!!
+          const encoding = toUpper(attachment.encoding)
+          //A6 UID FETCH {attrs.uid} (UID FLAGS INERNALDATE BODY.PEEK[{attchment.partID}])
+          const f = imap.fetch(attrs.uid, {bodies: [attachment.partID]})
+          f.on('message', (msg, seqno) =>{
+            const prefix = `(#${seqno})`
+            msg.on('body', (stream, info) =>{
+              const writeStream = fs.createWriteStream(filename);
+              writeStream.on('finish',() =>{
+                console.log(`${prefix} Done writing to file ${filename}`)
+              })
+              if(encoding == 'BASE64') Stream.pipe(base64.decode()).pipe(writeStream)
+              else stream.pipe(writeStream)
+            })
+          })
+          })
           console.log(prefix + 'Attributes: %s', inspect(attrs, false, 8));
           for (var i = 0, len=attachments.length ; i < len; ++i) {
             var attachment = attachments[i];
