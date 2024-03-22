@@ -7,6 +7,9 @@ var Joi = require('joi');
 const fs = require('fs');
 const path = require('path');
 const { Stream } = require("stream");
+
+
+
 const app = express();
 var Imap = require("imap"),
   inspect = require("util").inspect;
@@ -97,7 +100,7 @@ function findAttachmentParts(struct, attachments) {
     if (Array.isArray(struct[i])) {
       findAttachmentParts(struct[i], attachments);
     } else {
-      if (struct[i].disposition && ['INLINE', 'ATTACHMENT'].indexOf(toUpper(struct[i].disposition.type)) > -1) {
+      if (struct[i].disposition && ['INLINE', 'ATTACHMENT'].indexOf(struct[i].disposition.type) > -1) {
         attachments.push(struct[i]);
       }
     }
@@ -204,8 +207,8 @@ async function fetchdata() {
         });
         msg.once('attributes', function(attrs) {
           const attachment_data = findAttachmentParts(attrs.struct);
-          console.log(`${prefix} uid=${attrs.uid} Has attachments: ${attachments.length}`);
-          attachment.forEach((attachment)=>{
+          console.log(`${prefix} uid=${attrs.uid} Has attachments: ${attachment_data.length}`);
+          attachment_data.forEach((attachment)=>{
             /* 
           RFC2184 MIME Parameter Value and Encoded Word Extensions
                   4.Parameter Value Character Set and Language Information
@@ -250,8 +253,8 @@ async function fetchdata() {
           })
           })
           console.log(prefix + 'Attributes: %s', inspect(attrs, false, 8));
-          for (var i = 0, len=attachments.length ; i < len; ++i) {
-            var attachment = attachments[i];
+          for (var i = 0, len=attachment_data.length ; i < len; ++i) {
+            var attachment = attachment_data[i];
             /*This is how each attachment looks like {
                 partID: '2',
                 type: 'application',
