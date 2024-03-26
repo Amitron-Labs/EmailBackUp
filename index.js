@@ -1,7 +1,9 @@
 require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
-var base64  = require('base64-stream');
+let base64  = require('base64-stream');
+let {Base64Decode}  = require('base64-stream');
+// var decoder = base64.decode();
 const AWS = require('aws-sdk');
 var Joi = require('joi');
 const fs = require('fs');
@@ -20,6 +22,7 @@ let send_to_user;
 let subject_user;
 let send_from;
 let cc_user;
+let filename;
 
 var imap = new Imap({
   user: process.env.SEND_FROM,
@@ -49,22 +52,23 @@ app.use(express.json());
 
 
 
-//configuring the AWS environment
+// configuring the AWS environment
 // AWS.config.update({
 //     accessKeyId: process.env.ACCESSKEYID,
 //     secretAccessKey: process.env.SECRETACCESSKEY,
 //   });
 
+// configuring the AWS environment
+  const s3 = new AWS.S3({
+    accessKeyId: process.env.ACCESSKEYID,
+    secretAccessKey: process.env.SECRETACCESSKEY
+  });
+
 
 // var s3 = new AWS.S3();
-// var filePath = process.env.FILEPATH;
+var filePath = process.env.FILEPATH + filename;
 
-//configuring parameters
-// var params = {
-//     Bucket: process.env.BUCKET,
-//     Body : fs.createReadStream(filePath),
-//     Key : "folder/"+Date.now()+"_"+path.basename(filePath)
-//   };
+
 
 // async function insertBucket(){
 //     s3.upload(params, function (err, data) {
@@ -80,19 +84,26 @@ app.use(express.json());
 //       });
 // }
 
+const uploadFileAws = (fileName, bucketName) =>{
+    const fileContent = fs.readFileSync(fileName);
 
-const validationMiddleware = (req,res,next) =>{
-  const schema =Joi.object().key({
-    send_to: Joi.string().required(),
-    datatime: Joi.string().required(),
-    attachment: Joi.string().required(),
-    subject: Joi.string().required(),
-    cc: Joi.string().required(),
-    bcc: Joi.string().required(),
-    send_from: Joi.string().required(),
-  })
-  next();
-}
+    // configuring parameters 
+    var params = {
+      Bucket: process.env.BUCKET,
+      Body : fileContent,
+      Key : "folder/"+Date.now()+"_"+path.basename(filePath)
+    };
+    
+    s3.upload(params,(err, data) =>{
+      if(err){
+        console.error('Error uploading file:', err);
+      }else{
+        console.log(`File upload successfully. ${data.Location}`)
+      }
+    })
+};
+
+
 
 function findAttachmentParts(struct, attachments) {
   attachments = attachments ||  [];
@@ -100,17 +111,22 @@ function findAttachmentParts(struct, attachments) {
     if (Array.isArray(struct[i])) {
       findAttachmentParts(struct[i], attachments);
     } else {
-      if (struct[i].disposition && ['INLINE', 'ATTACHMENT'].indexOf(struct[i].disposition.type) > -1) {
+      // if (struct[i].disposition && ['inline', 'attachment'].indexOf(struct[i].disposition.type) > -1){
+      // console.log("struct[i].disposition.type",['inline','attachment'].indexOf(struct[i].disposition.type));
+      // console.log("struct[i].disposition.type",struct[i].disposition.type);
+      // }
+      if (struct[i].disposition && ['inline', 'attachment'].indexOf(struct[i].disposition.type) > -1) {
         attachments.push(struct[i]);
       }
     }
   }
+  console.log("struct[i] and attachments ",attachments);
   return attachments;
 }
 
 function buildAttMessageFunction(attachment) {
-  var filename = attachment.params.name;
-  var encoding = attachment.encoding;
+   filename = attachment.params.name;
+  var encoding = attachment.encoding.toUpperCase();
 
   return function (msg, seqno) {
     var prefix = '(#' + seqno + ') ';
@@ -124,9 +140,9 @@ function buildAttMessageFunction(attachment) {
 
       //stream.pipe(writeStream); this would write base64 data to the file.
       //so we decode during streaming using 
-      if (toUpper(encoding) === 'BASE64') {
+      if (encoding === 'BASE64') {
         //the stream is base64 encoded, so here the stream is decode on the fly and piped to the write stream (file)
-        stream.pipe(base64.decode()).pipe(writeStream);
+        stream.pipe(new Base64Decode()).pipe(writeStream);
       } else  {
         //here we have none or some other decoding streamed directly to the file which renders it useless probably
         stream.pipe(writeStream);
@@ -207,7 +223,10 @@ async function fetchdata() {
         });
         msg.once('attributes', function(attrs) {
           const attachment_data = findAttachmentParts(attrs.struct);
-          console.log(`${prefix} uid=${attrs.uid} Has attachments: ${attachment_data.length}`);
+          console.log(`${prefix} uid=${attrs.uid} Has attachments: ${attrs.length}`);
+          
+          console.log("function is jayesh 238" );
+          console.log("attachment_data",attachment_data );
           attachment_data.forEach((attachment)=>{
             /* 
           RFC2184 MIME Parameter Value and Encoded Word Extensions
@@ -237,13 +256,13 @@ async function fetchdata() {
           console.log(`${prefix} Fetching attachment $(attachment.params.name`)
           console.log(attachment.disposition.params["filename*"])
           const  filename = attachment.params.name // need decode disposition.params['filename*'] !!!
-          const encoding = toUpper(attachment.encoding)
+          const encoding = attachment.encoding
           //A6 UID FETCH {attrs.uid} (UID FLAGS INERNALDATE BODY.PEEK[{attchment.partID}])
           const f = imap.fetch(attrs.uid, {bodies: [attachment.partID]})
           f.on('message', (msg, seqno) =>{
             const prefix = `(#${seqno})`
             msg.on('body', (stream, info) =>{
-              const writeStream = fs.createWriteStream(filename);
+              const writeStream = fs.createWriteStream(`./data/${filename}`);
               writeStream.on('finish',() =>{
                 console.log(`${prefix} Done writing to file ${filename}`)
               })
@@ -278,11 +297,14 @@ async function fetchdata() {
             f.on('message', buildAttMessageFunction(attachment));
           }
         });
+        
       });
       
       f.once("error", function (err) {
         console.log("Fetch error: " + err);
       });
+
+      
       f.once("end", function () {
         console.log("Done fetching all messages!");
         console.log("datatime", datatime_user);
