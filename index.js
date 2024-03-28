@@ -121,9 +121,18 @@ async function fetchdata() {
       });
       f.on("message", function (msg, seqno) {
         console.log("Message #%d", seqno);
+        console.log("Message type", + msg.text)
         var prefix = "(#" + seqno + ") ";
         msg.on("body", function (stream, info) {
           var buffer = "";
+          simpleParser(stream, async (err, parsed) => {
+            // const {from, subject, textAsHtml, text} = parsed;
+            console.log("parsed",parsed);
+            /* Make API call to save the data
+               Save the retrieved data into a database.
+               E.t.c
+            */
+          });
           stream.on("data", function (chunk) {
             buffer += chunk.toString("utf8");
           });
