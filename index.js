@@ -163,12 +163,15 @@ const fetchEmails = () => {
             });
             for (var i = 0, len = attachment_data.length, r; i < len; ++i) {
               console.log("filename", attachment_data[i].params.name);
+              
             }
           });
         });
 
         fetch.once("end", () => {
           imap.end();
+        
+
         });
       });
     });
@@ -186,6 +189,15 @@ const fetchEmails = () => {
     const objectIdString = updateUserById(object_id,updateData)
     console.log("objectIdString",objectIdString );
     // updateData(object_id, file_aws_name);
+    fs.readdir('./data/', (err, files) => {
+      if (err) throw err;
+
+      for (const file of files) {
+          console.log(file + ' : File Deleted Successfully.');
+          fs.unlinkSync('./data/'+file);
+      }
+
+    });
   });
 };
 
