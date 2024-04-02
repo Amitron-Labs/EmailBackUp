@@ -68,6 +68,7 @@ var userSchema = new mongoose.Schema({
 // Middleware to parse JSON bodies
 app.use(express.json());
 
+// AWS s3 bucket code for uploading the file 
 function uploadFileAws(file_name, file_link) {
   let fileName = `./data/${file_name}`;
   bucketName = process.env.BUCKET;
