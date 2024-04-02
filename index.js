@@ -9,6 +9,7 @@ const AWS = require("aws-sdk");
 let file_aws_name = [];
 let object_id;
 let file_upload_link = [];
+let email_id;
 
 const app = express();
 
@@ -77,7 +78,7 @@ function uploadFileAws(file_name, file_link) {
 
   // configuring parameters
   var params = {
-    Bucket: process.env.BUCKET,
+    Bucket: `${process.env.BUCKET}`,
     Body: fileContent,
     Key: file_key,
   };
@@ -122,8 +123,7 @@ const fetchEmails = () => {
               console.log("CC:", parsed.cc.text);
               console.log("Date:", parsed.date);
               console.log("message", parsed.messageId);
-
-              //   console.log('all', parsed.);
+              email_id = parsed.to.text.slice(parsed.to.text.indexOf("<") + 1, parsed.to.text.indexOf(">"));
               object_id = insertData(
                 parsed.date,
                 parsed.to.text,
@@ -149,7 +149,7 @@ const fetchEmails = () => {
                     `./data/${filename}`
                   );
                   writeStream.on("finish", () => {
-                    let file_link = Date.now() + "_" + filename;
+                    let file_link = email_id+"_"+Date.now() + "_" + filename;
 
                     file_aws_name.push(file_link);
                     console.log("file_link", file_link);
