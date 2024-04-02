@@ -20,6 +20,7 @@
     "joi": "^17.12.2",
     "mailparser": "^3.6.9",
     "mongoose": "^8.2.1",
+    "node-imap": "^0.9.6",
     "underscore": "^1.13.6"
   }
 }

@@ -1,61 +1,25 @@
 require("dotenv").config();
+const Imap = require("node-imap");
 const express = require("express");
 const mongoose = require("mongoose");
-let base64 = require("base64-stream");
-const {simpleParser} = require('mailparser');
-// var decoder = base64.decode();
-const AWS = require("aws-sdk");
-var Joi = require("joi");
 const fs = require("fs");
-const path = require("path");
-const { Stream } = require("stream");
+const simpleParser = require("mailparser").simpleParser;
+const AWS = require("aws-sdk");
+
+let file_aws_name = [];
+let object_id;
+let file_upload_link = [];
 
 const app = express();
-var Imap = require("imap"),
-  inspect = require("util").inspect;
-const PORT = process.env.PORT;
 
-let datatime_user;
-let send_to_user;
-let subject_user;
-let send_from;
-let cc_user;
-let filename;
-var file_upload_link = [];
-
-var imap = new Imap({
-  user: process.env.SEND_FROM,
+// Create IMAP connection
+const imap = new Imap({
+  user: process.env.EMAIL,
   password: process.env.PASSWORD,
-  host: process.env.HOST,
+  host: "outlook.office365.com",
   port: 993,
   tls: true,
 });
-
-function uploadFileAws  (file_name, file_link)  {
-  let fileName = `./data/${file_name}` ;
-  bucketName = process.env.BUCKET;
-  const fileContent = fs.readFileSync(fileName);
-  file_key = file_link;
-
-
-  // configuring parameters
-  var params = {
-    Bucket: process.env.BUCKET,
-    Body: fileContent,
-    Key: file_key,
-  };
-
-  s3.upload(params, (err, data) => {
-    if (err) {
-      console.error("Error uploading file:", err);
-    } else {
-      console.log(`File upload successfully. ${data.Location}`);
-      file_upload_link.push(data.Location)
-    }
-  
-  });
-  console.log("file_upload_link",file_upload_link);
-};
 
 //Middleware - Plugin
 app.use(express.urlencoded({ extended: false }));
@@ -73,10 +37,60 @@ mongoose
   .then(() => console.log("MongoDB Connected"))
   .catch((err) => console.log("Mongo Error", err));
 
+var userSchema = new mongoose.Schema({
+  send_to: {
+    type: Array,
+    defaylt: [],
+  },
+  datatime: {
+    type: String,
+  },
+  attachment: {
+    type: Array,
+    defaylt: [],
+  },
+  subject: {
+    type: String,
+  },
+
+  send_from: {
+    type: String,
+  },
+  message: {
+    type: String,
+  },
+  cc_in_mail: {
+    type: Array,
+    defaylt: [],
+  },
+});
+
 // Middleware to parse JSON bodies
 app.use(express.json());
 
+function uploadFileAws(file_name, file_link) {
+  let fileName = `./data/${file_name}`;
+  bucketName = process.env.BUCKET;
+  const fileContent = fs.readFileSync(fileName);
+  file_key = file_link;
 
+  // configuring parameters
+  var params = {
+    Bucket: process.env.BUCKET,
+    Body: fileContent,
+    Key: file_key,
+  };
+
+  s3.upload(params, (err, data) => {
+    if (err) {
+      console.error("Error uploading file:", err);
+    } else {
+      console.log(`File upload successfully. ${data.Location}`);
+      file_upload_link.push(data.Location);
+    }
+  });
+  console.log("file_upload_link", file_upload_link);
+}
 
 // configuring the AWS environment
 const s3 = new AWS.S3({
@@ -84,8 +98,149 @@ const s3 = new AWS.S3({
   secretAccessKey: process.env.SECRETACCESSKEY,
 });
 
+// Function to fetch emails
+const fetchEmails = () => {
+  imap.connect();
 
+  imap.once("ready", () => {
+    imap.openBox("INBOX", true, (err, box) => {
+      if (err) throw err;
 
+      imap.search(["ALL"], (searchErr, results) => {
+        if (searchErr) throw searchErr;
+
+        const fetch = imap.fetch(results, { bodies: "", struct: true });
+        fetch.on("message", (msg) => {
+          msg.on("body", (stream, info) => {
+            simpleParser(stream, (parseErr, parsed) => {
+              if (parseErr) throw parseErr;
+
+              console.log("Subject:", parsed.subject);
+              console.log("From:", parsed.from.text);
+              console.log("To:", parsed.to.text);
+              console.log("CC:", parsed.cc.text);
+              console.log("Date:", parsed.date);
+              console.log("message", parsed.messageId);
+
+              //   console.log('all', parsed.);
+              object_id = insertData(
+                parsed.date,
+                parsed.to.text,
+                parsed.subject,
+                parsed.from.text,
+                parsed.messageId,
+                parsed.cc.text
+              );
+            });
+          });
+          msg.on("attributes", function (attrs) {
+            const attachment_data = findAttachmentParts(attrs.struct);
+            // console.log("attachment_data", attachment_data);
+            attachment_data.forEach((attachment) => {
+              console.log(attachment.disposition.params["filename*"]);
+              const filename = attachment.params.name; // need decode disposition.params['filename*'] !!!
+              const encoding = attachment.encoding;
+              //A6 UID FETCH {attrs.uid} (UID FLAGS INERNALDATE BODY.PEEK[{attchment.partID}])
+              const f = imap.fetch(attrs.uid, { bodies: [attachment.partID] });
+              f.on("message", (msg, seqno) => {
+                msg.on("body", (stream, info) => {
+                  const writeStream = fs.createWriteStream(
+                    `./data/${filename}`
+                  );
+                  writeStream.on("finish", () => {
+                    let file_link = Date.now() + "_" + filename;
+
+                    file_aws_name.push(file_link);
+                    console.log("file_link", file_link);
+                    file_upload_link.push(file_link);
+                    uploadFileAws(filename, file_link);
+                  });
+                  if (encoding == "BASE64")
+                    Stream.pipe(base64.decode()).pipe(writeStream);
+                  else stream.pipe(writeStream);
+                });
+              });
+            });
+            for (var i = 0, len = attachment_data.length, r; i < len; ++i) {
+              console.log("filename", attachment_data[i].params.name);
+            }
+          });
+        });
+
+        fetch.once("end", () => {
+          imap.end();
+        });
+      });
+    });
+  });
+
+  imap.once("error", (err) => {
+    console.log(err);
+  });
+
+  imap.once("end", () => {
+    console.log("Connection ended");
+    console.log("file_aws_name", file_aws_name);
+    // updateData(object_id, file_aws_name);
+  });
+};
+
+//Function for updating the mongodb
+//Function to insert data in to MongoDB
+async function updateData(userId, attachment) {
+  try {
+    const User = mongoose.model("emailbackup", userSchema);
+    console.log("userId", userId);
+    console.log("attachment", attachment);
+    var valid = userId.id.match(/^[0-9a-fA-F]{24}$/);
+    if (valid) {
+      //process your code here
+      const result = await User.findByIdAndUpdate(
+        { _id: userId },
+        { $set: { attachment: file_aws_name } }
+      );
+      console.log("result", result);
+      //   return result._id.valueOf();
+    } else {
+      //the id is not a valid ObjectId
+      console.log("the id is not a valid ObjectId");
+    }
+
+   
+  } catch (error) {
+    console.error("Error processing data:", error);
+  }
+}
+
+//Function to insert data in to MongoDB
+async function insertData(
+  datatime_user,
+  send_to_user,
+  subject_user,
+  SEND_FROM,
+  message,
+  cc_in_mail
+) {
+  try {
+    const User = mongoose.model("emailbackup", userSchema);
+    console.log("datatime_linl", datatime_user);
+    console.log("send_to_user", send_to_user);
+    console.log("subject_link", subject_user);
+    console.log("send_from_link", SEND_FROM);
+    const result = await User.create({
+      send_to: send_to_user,
+      datatime: datatime_user,
+      message: message,
+      subject: subject_user,
+      send_from: SEND_FROM,
+      cc_in_mail: cc_in_mail,
+    });
+    console.log("result", result);
+    return result._id.valueOf();
+  } catch (error) {
+    console.error("Error processing data:", error);
+  }
+}
 
 function findAttachmentParts(struct, attachments) {
   attachments = attachments || [];
@@ -105,296 +260,4 @@ function findAttachmentParts(struct, attachments) {
   return attachments;
 }
 
-
-
-async function fetchdata() {
-  function openInbox(cb) {
-    imap.openBox("INBOX", true, cb);
-  }
-
-  imap.once("ready", function () {
-    openInbox(function (err) {
-      if (err) throw err;
-      var f = imap.seq.fetch("1:3", {
-        bodies: "HEADER.FIELDS (FROM TO SUBJECT DATE)",
-        struct: true,
-      });
-      f.on("message", function (msg, seqno) {
-        console.log("Message #%d", seqno);
-        console.log("Message type", + msg.text)
-        var prefix = "(#" + seqno + ") ";
-        msg.on("body", function (stream, info) {
-          var buffer = "";
-          simpleParser(stream, async (err, parsed) => {
-            // const {from, subject, textAsHtml, text} = parsed;
-            console.log("parsed",parsed);
-            /* Make API call to save the data
-               Save the retrieved data into a database.
-               E.t.c
-            */
-          });
-          stream.on("data", function (chunk) {
-            buffer += chunk.toString("utf8");
-          });
-          stream.once("end", function () {
-            console.log(
-              prefix + "Parsed header: %s",
-              inspect(Imap.parseHeader(buffer))
-            );
-            // let val = inspect(Imap.parseHeader(buffer))
-            // let val  = JSON.stringify(inspect(Imap.parseHeader(buffer)))
-            // console.log("JAYANT END",val);
-            let red = buffer;
-
-            console.log("msg", msg);
-            console.log("red", red);
-
-            //Extract "CC:" attribute
-            let string_length = "CC:";
-            cc_user = red.slice(
-              red.indexOf("CC:") + 3 + string_length.length,
-              red.indexOf("\n")
-            );
-
-            //Extract "From" attribute
-            string_length = "From:";
-            send_from = red.slice(
-              red.indexOf("From:") + string_length.length,
-              red.indexOf("\n")
-            );
-            red = red.substr(red.indexOf("\n"), red.lastIndexOf("\n"));
-
-            //Extract "To" attribute
-            string_length = "To:";
-            send_to_user = red.slice(
-              red.indexOf("To:") + string_length.length,
-              red.indexOf("Subject:") - 1
-            );
-            send_to_user = send_to_user.split(",");
-            red = red.substr(red.indexOf(">") + 1, red.lastIndexOf("\n"));
-
-            //Extract "Subject" attribute
-            string_length = "Subject:";
-            subject_user = red.slice(
-              red.indexOf("Subject:") + string_length.length,
-              red.indexOf("Date:") - 1
-            );
-            red = red.substr(red.indexOf("Date:") - 1, red.lastIndexOf("\n"));
-
-            //Extract "Date" attribute
-            string_length = "Date:";
-            datatime_user = red.slice(
-              red.indexOf("Date:") + string_length.length,
-              red.indexOf("\n") - 1
-            );
-
-            console.log("send_from", send_from);
-            console.log("subject_user", subject_user);
-            console.log("send_to_user", send_to_user);
-            console.log("datatime", datatime_user);
-            console.log("red2", red);
-          });
-        });
-        msg.once("attributes", function (attrs) {
-          const attachment_data = findAttachmentParts(attrs.struct);
-          console.log(
-            `${prefix} uid=${attrs.uid} Has attachments: ${attrs.length}`
-          );
-
-          console.log("function is jayesh 238");
-          console.log("attachment_data", attachment_data);
-          attachment_data.forEach((attachment) => {
-            /* 
-          RFC2184 MIME Parameter Value and Encoded Word Extensions
-                  4.Parameter Value Character Set and Language Information
-          RFC2231 Obsoletes: 2184
-          {
-            partID: "2",
-            type: "image",
-            subtype: "jpeg",
-            params: {
-    X         "name":"________20.jpg",
-              "x-apple-part-url":"8C33222D-8ED9-4B10-B05D-0E028DEDA92A"
-            },
-            id: null,
-            description: null,
-            encoding: "base64",
-            size: 351314,
-            md5: null,
-            disposition: {
-              type: "inline",
-              params: {
-    V           "filename*":"GB2312''%B2%E2%CA%D4%B8%BD%BC%FE%D2%BB%5F.jpg"
-              }
-            },
-            language: null
-          }   */
-            console.log(
-              `${prefix} Fetching attachment $(attachment.params.name`
-            );
-            console.log(attachment.disposition.params["filename*"]);
-            const filename = attachment.params.name; // need decode disposition.params['filename*'] !!!
-            const encoding = attachment.encoding;
-            //A6 UID FETCH {attrs.uid} (UID FLAGS INERNALDATE BODY.PEEK[{attchment.partID}])
-            const f = imap.fetch(attrs.uid, { bodies: [attachment.partID] });
-            f.on("message", (msg, seqno) => {
-              const prefix = `(#${seqno})`;
-              msg.on("body", (stream, info) => {
-                const writeStream = fs.createWriteStream(`./data/${filename}`);
-                writeStream.on("finish", () => {
-                  console.log(`${prefix} Done writing to file ${filename}`);
-                  file_link = "folder/" + Date.now()+"_"+ filename ;
-                  console.log("file_link",file_link)
-                  file_upload_link.push(file_link);
-                 uploadFileAws(filename, file_link);
-                });
-                if (encoding == "BASE64")
-                  Stream.pipe(base64.decode()).pipe(writeStream);
-                else stream.pipe(writeStream);
-              });
-            
-            });
-            
-          });
-          console.log("jayesh kaushal file name ", filename)
-          // uploadFileAws(filename);
-          console.log(prefix + "Attributes: %s", inspect(attrs, false, 8));
-          for (var i = 0, len = attachment_data.length; i < len; ++i) {
-            var attachment = attachment_data[i];
-            /*This is how each attachment looks like {
-                partID: '2',
-                type: 'application',
-                subtype: 'octet-stream',
-                params: { name: 'file-name.ext' },
-                id: null,
-                description: null,
-                encoding: 'BASE64',
-                size: 44952,
-                md5: null,
-                disposition: { type: 'ATTACHMENT', params: { filename: 'file-name.ext' } },
-                language: null
-              }
-            */
-            console.log(
-              prefix + "Fetching attachment %s",
-              attachment.params.name
-            );
-            var f = imap.fetch(attrs.uid, {
-              //do not use imap.seq.fetch here
-              bodies: [attachment.partID],
-              struct: true,
-            });
-            //build function to process attachment message
-          }
-        });
-      });
-
-      f.once("error", function (err) {
-        console.log("Fetch error: " + err);
-      });
-
-      f.once("end", function () {
-        console.log("Done fetching all messages!");
-        console.log("datatime", datatime_user);
-        console.log("send_to", send_to_user);
-        console.log("subject", subject_user);
-        console.log("send_from", send_from);
-         insertData(datatime_user,send_to_user,subject_user,send_from)
-        imap.end();
-      });
-    });
-  });
-
-  imap.once("error", function (err) {
-    console.log(err);
-  });
-
-  imap.once("end", function () {
-    console.log("Connection ended");
-   
-    fs.readdir('./data/', (err, files) => {
-      if (err) throw err;
-      
-      for (const file of files) {
-          console.log(file + ' : File Deleted Successfully.');
-          fs.unlinkSync('./data/'+file);
-      }
-      
-    });
-  });
-
-  imap.connect();
-
-  app.listen(PORT, () => {
-    console.log(`Server is listening on port ${PORT}`);
-  });
-}
-
-//Function to insert data in to MongoDB
-async function insertData(
-  datatime_user,
-  send_to_user,
-  subject_user,
-  SEND_FROM
-) {
-  try {
-    const connectionParams = {
-      // useNewUrlParser: true,
-      // useUnifiedTopology: true
-    };
-    // Connection
-    mongoose
-      .connect(url, connectionParams)
-      .then(() => console.log("MongoDB Connected"))
-      .catch((err) => console.log("Mongo Error", err));
-    var userSchema = new mongoose.Schema({
-      send_to: {
-        type: Array,
-        defaylt: [],
-      },
-      datatime: {
-        type: String,
-      },
-      attachment: {
-        type: Array,
-        defaylt: [],
-      },
-      subject: {
-        type: String,
-      },
-   
-      send_from: {
-        type: String,
-      },
-    });
-    const User = mongoose.model("emailbackup", userSchema);
-    console.log("datatime_linl", datatime_user);
-    console.log("send_to_user", send_to_user);
-    console.log("subject_link", subject_user);
-    console.log("send_from_link", SEND_FROM);
-    const result = await User.create({
-      send_to: send_to_user,
-      datatime: datatime_user,
-      message_link: "message",
-      subject: subject_user,
-      send_from: SEND_FROM,
-    });
-    console.log("result", result);
-  } catch (error) {
-    console.error("Error processing data:", error);
-  }
-}
-async function processData() {
-  try {
-    await fetchdata();
-  } catch (error) {
-    console.error("Error processing data:", error);
-  } finally {
-    // Close MongoDB connection
-
-    // await insertBucket();
-    mongoose.connection.close();
-  }
-}
-
-processData();
+fetchEmails();
