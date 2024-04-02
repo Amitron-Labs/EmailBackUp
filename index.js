@@ -181,34 +181,28 @@ const fetchEmails = () => {
   imap.once("end", () => {
     console.log("Connection ended");
     console.log("file_aws_name", file_aws_name);
+    // const objectIdString = object_id.toString();
+    let updateData = { attachment : file_aws_name}
+    const objectIdString = updateUserById(object_id,updateData)
+    console.log("objectIdString",objectIdString );
     // updateData(object_id, file_aws_name);
   });
 };
 
 //Function for updating the mongodb
-//Function to insert data in to MongoDB
-async function updateData(userId, attachment) {
+async function updateUserById(userIdPromise, updateData) {
   try {
-    const User = mongoose.model("emailbackup", userSchema);
-    console.log("userId", userId);
-    console.log("attachment", attachment);
-    var valid = userId.id.match(/^[0-9a-fA-F]{24}$/);
-    if (valid) {
-      //process your code here
-      const result = await User.findByIdAndUpdate(
-        { _id: userId },
-        { $set: { attachment: file_aws_name } }
-      );
-      console.log("result", result);
-      //   return result._id.valueOf();
-    } else {
-      //the id is not a valid ObjectId
-      console.log("the id is not a valid ObjectId");
-    }
-
-   
+      const User = mongoose.model("emailbackup", userSchema);
+      const userId = await userIdPromise; // Resolve the Promise to get the ObjectId
+      console.log("updateData",updateData)
+      const updatedUser = await User.findByIdAndUpdate(userId, updateData, { new: true });
+      if (updatedUser) {
+          console.log('User updated successfully:', updatedUser);
+      } else {
+          console.log('User not found');
+      }
   } catch (error) {
-    console.error("Error processing data:", error);
+      console.error('Error updating user:', error);
   }
 }
 
